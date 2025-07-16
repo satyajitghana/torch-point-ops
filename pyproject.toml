@@ -1,9 +1,51 @@
 [project]
 name = "torch-point-ops"
 version = "0.1.0"
-description = "Add your description here"
+description = "A PyTorch library for point cloud operations, including Chamfer Distance and Earth Mover's Distance (EMD)."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.13"
+license = "MIT"
+authors = [
+    { name = "Satyajit Ghana", email = "satyajitghana7@gmail.com" },
+]
+keywords = ["pytorch", "point-cloud", "chamfer-distance", "earth-movers-distance", "deep-learning", "3d", "computer-vision"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Operating System :: OS Independent",
+    "Programming Language :: C++",
+]
 dependencies = [
-    "torch>=2.5.1",
+    "numpy<2",
+    "torch>=2.7.1",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/satyajitghana/torch-point-ops"
+"Repository" = "https://github.com/satyajitghana/torch-point-ops"
+"Bug Tracker" = "https://github.com/satyajitghana/torch-point-ops/issues"
+
+[tool.uv]
+no-build-isolation = true
+package = false
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[dependency-groups]
+dev = [
+    "auditwheel>=6.4.1",
+    "black>=25.1.0",
+    "expecttest>=0.3.0",
+    "pytest>=8.4.1",
+    "ruff>=0.12.3",
 ]
