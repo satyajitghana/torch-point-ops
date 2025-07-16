@@ -6,8 +6,7 @@ import numpy as np
 
 # Since the package is installed, we can import it.
 from torch_point_ops import EarthMoverDistance
-from torch_point_ops.emd import emd as emd_mod
-from torch_point_ops.emd.emd import emd
+from torch_point_ops.emd import earth_movers_distance
 
 def reference_emd(p1, p2):
     """
@@ -48,7 +47,7 @@ class TestEMDDistance(TestCase):
 
         # The CUDA op is non-deterministic, so we can't check for equality.
         # We can only check that the output is reasonable.
-        dist = emd(p1, p2)
+        dist = earth_movers_distance(p1, p2)
         self.assertEqual(dist.dim(), 1)
         self.assertEqual(dist.shape[0], p1.shape[0])
 
@@ -56,7 +55,7 @@ class TestEMDDistance(TestCase):
         device = "cuda"
         p1 = torch.tensor([[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]], dtype=torch.float32, device=device)
         p2 = p1.clone()
-        dist = emd(p1, p2)
+        dist = earth_movers_distance(p1, p2)
         self.assertTrue(torch.allclose(dist, torch.zeros_like(dist), atol=1e-6))
 
     def test_static_values(self):
@@ -69,7 +68,7 @@ class TestEMDDistance(TestCase):
         p1.requires_grad = True
         p2.requires_grad = True
 
-        dist = emd(p1, p2)
+        dist = earth_movers_distance(p1, p2)
         loss = dist[0] / 2 + dist[1] * 2 + dist[2] / 3
         loss.backward()
 
@@ -101,13 +100,13 @@ class TestEMDDistance(TestCase):
         p1 = torch.randn(2, 10, 3, device=device)
         p_empty = torch.empty(2, 0, 3, device=device)
 
-        dist = emd(p1, p_empty)
+        dist = earth_movers_distance(p1, p_empty)
         self.assertTrue(torch.all(dist == 0))
 
-        dist = emd(p_empty, p1)
+        dist = earth_movers_distance(p_empty, p1)
         self.assertTrue(torch.all(dist == 0))
 
-        dist = emd(p_empty, p_empty)
+        dist = earth_movers_distance(p_empty, p_empty)
         self.assertTrue(torch.all(dist == 0))
         
     def test_opcheck(self):

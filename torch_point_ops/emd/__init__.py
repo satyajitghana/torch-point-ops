@@ -41,16 +41,27 @@ def emd(xyz1: torch.Tensor, xyz2: torch.Tensor) -> torch.Tensor:
     Earth Mover's Distance
     
     Args:
-        xyz1 (torch.Tensor): (B, N, 3)
-        xyz2 (torch.Tensor): (B, M, 3)
+        xyz1 (torch.Tensor): (B, N, 3) - Point cloud 1
+        xyz2 (torch.Tensor): (B, M, 3) - Point cloud 2
+    
     Returns:
-        torch.Tensor: (B) cost
+        torch.Tensor: (B) EMD distances
+    
+    Note:
+        Tensors are automatically made contiguous internally - no need for users to call .contiguous()
     """
+    # Ensure tensors are contiguous (required by CUDA implementation)
+    xyz1 = xyz1.contiguous()
+    xyz2 = xyz2.contiguous()
+    
     cost, _ = torch.ops.torch_point_ops_emd.emd_forward(xyz1, xyz2)
     # Handle empty point clouds
     if xyz1.size(1) == 0:
         return torch.zeros_like(cost)
     return cost / xyz1.size(1)
+
+# Alias for more descriptive naming
+earth_movers_distance = emd
 
 # Expose the emd function from the emd module
 from .emd import EarthMoverDistance 

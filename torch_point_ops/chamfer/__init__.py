@@ -39,6 +39,25 @@ def _(xyz1, xyz2, idx1, idx2, grad_dist1, grad_dist2):
 # This is a wrapper to expose a single chamfer_distance op to the user
 # with autograd support.
 def chamfer_distance(xyz1: torch.Tensor, xyz2: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Chamfer Distance between two point clouds
+    
+    Args:
+        xyz1 (torch.Tensor): (B, N, 3) - Point cloud 1
+        xyz2 (torch.Tensor): (B, M, 3) - Point cloud 2
+    
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: 
+            - dist1: (B, N) distances from xyz1 to xyz2
+            - dist2: (B, M) distances from xyz2 to xyz1
+    
+    Note:
+        Tensors are automatically made contiguous internally - no need for users to call .contiguous()
+    """
+    # Ensure tensors are contiguous (required by CUDA implementation)
+    xyz1 = xyz1.contiguous()
+    xyz2 = xyz2.contiguous()
+    
     dist1, dist2, _, _ = torch.ops.torch_point_ops_chamfer.chamfer_forward(xyz1, xyz2)
     return dist1, dist2
 
