@@ -18,7 +18,7 @@ def get_extensions():
     use_cuda = torch.cuda.is_available() or os.getenv("FORCE_CUDA", "0") == "1"
 
     extensions = []
-    
+
     # Chamfer extension
     chamfer_sources = glob.glob(f"{library_name}/chamfer/csrc/*.cpp")
     chamfer_cuda_sources = glob.glob(f"{library_name}/chamfer/csrc/cuda/*.cu")
@@ -42,7 +42,7 @@ def get_extensions():
 
     if use_cuda:
         emd_sources.extend(emd_cuda_sources)
-    
+
     extensions.append(
         CUDAExtension(
             name=f"{library_name}.emd._C",
@@ -57,4 +57,4 @@ def get_extensions():
 setup(
     ext_modules=get_extensions(),
     cmdclass={"build_ext": BuildExtension},
-) 
+)
