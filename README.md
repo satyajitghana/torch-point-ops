@@ -66,6 +66,29 @@ Follow these instructions to set up `torch-point-ops` in a local development env
     ```
 This command installs the library in editable mode, allowing you to modify the source code and see the changes immediately.
 
+### 🪝 Setting Up Code Quality Hooks (Recommended for Contributors)
+
+For the best development experience and to ensure code quality, set up automated formatting and linting:
+
+```bash
+bash scripts/setup_hooks.sh
+```
+
+This gives you two options:
+
+**Option 1: Pre-commit Framework (Recommended for Teams)**
+- 🚀 Industry-standard tool used by major projects
+- ✨ Runs Black, Ruff, and other quality checks
+- 🔄 Auto-updates hook versions
+- 🛡️ More robust than simple git hooks
+
+**Option 2: Simple Git Hook (Basic)**
+- 🔧 Simple Black formatter hook
+- 📝 Good for solo development
+- ⚡ Lightweight setup
+
+> **Production Note**: This repo uses GitHub Actions to enforce formatting on all PRs, so your code will be checked regardless! The hooks just help catch issues early. 🎯
+
 ## 🛠️ Building the Wheel
 
 To create a distributable wheel, run the provided build script. This is useful for installing the package in other environments without needing to build from source every time.
@@ -150,6 +173,30 @@ This command will automatically discover and run all tests in the `tests/` direc
 ## 🤝 Contributing
 
 Contributions are welcome! If you have a feature request, bug report, or want to contribute to the code, please open an issue or submit a pull request on the [GitHub repository](https://github.com/satyajitghana/torch-point-ops).
+
+### Code Formatting
+
+This project uses [Black](https://black.readthedocs.io/) for code formatting. Please ensure your code is formatted before submitting:
+
+```bash
+# Format all Python files
+black .
+
+# Check formatting without making changes
+black --check .
+```
+
+**Pro tip**: Set up the git hooks (see above) to automatically format your code! 🚀
+
+### 🤖 Automated Checks
+
+This repository uses **GitHub Actions** to ensure code quality on every PR:
+
+- ✅ **Black formatting** - Code must be properly formatted
+- 🔍 **Ruff linting** - Code must pass all lint checks  
+- 🚫 **PR blocking** - Improperly formatted code cannot be merged
+
+The workflow runs on Python 3.11, 3.12, and 3.13 to ensure compatibility.
 
 ## 📄 License
 

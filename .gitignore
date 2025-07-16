@@ -116,3 +116,5 @@ dmypy.json
 0.18.0.tar.gz.1
 
 wheelhouse/
+
+.ruff_cache/

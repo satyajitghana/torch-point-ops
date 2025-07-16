@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# Git pre-commit hook that runs Black formatter
+# This hook will format Python files using Black before commit
+
+# Get the root directory of the git repository
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# Path to virtual environment
+VENV_PATH="$REPO_ROOT/.venv"
+
+# Check if virtual environment exists
+if [ ! -d "$VENV_PATH" ]; then
+    echo "❌ Virtual environment not found at $VENV_PATH"
+    echo "   Please create a virtual environment first:"
+    echo "   python3 -m venv .venv"
+    echo "   source .venv/bin/activate"
+    echo "   pip install black"
+    exit 1
+fi
+
+# Activate virtual environment
+source "$VENV_PATH/bin/activate"
+
+# Check if black is installed
+if ! command -v black &> /dev/null; then
+    echo "❌ Black is not installed in the virtual environment"
+    echo "   Please install it with: pip install black"
+    exit 1
+fi
+
+# Get list of staged Python files
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$')
+
+if [ -z "$STAGED_FILES" ]; then
+    echo "✅ No Python files staged for commit"
+    exit 0
+fi
+
+echo "🔍 Checking Python files with Black..."
+echo "Files to check:"
+for file in $STAGED_FILES; do
+    echo "  - $file"
+done
+
+# Run black on staged files and capture output
+BLACK_OUTPUT=$(black --check --diff $STAGED_FILES 2>&1)
+BLACK_EXIT_CODE=$?
+
+if [ $BLACK_EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "❌ Black found formatting issues!"
+    echo ""
+    echo "$BLACK_OUTPUT"
+    echo ""
+    echo "🔧 Auto-formatting files..."
+    
+    # Format the files
+    black $STAGED_FILES
+    
+    echo ""
+    echo "✨ Files have been formatted with Black!"
+    echo ""
+    echo "📝 Please review the changes and commit again:"
+    echo "   git add ."
+    echo "   git commit"
+    echo ""
+    
+    exit 1
+else
+    echo "✅ All Python files are properly formatted!"
+    exit 0
+fi 
