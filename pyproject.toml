@@ -46,6 +46,7 @@ dev = [
     "auditwheel>=6.4.1",
     "black>=25.1.0",
     "expecttest>=0.3.0",
+    "fvcore>=0.1.5.post20221221",
     "pytest>=8.4.1",
     "ruff>=0.12.3",
 ]
