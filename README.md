@@ -204,7 +204,7 @@ knn_result = knn_points(p1_double, p2_double, K=8)
 
 ## 📊 Performance Benchmarking
 
-Want to see how fast these operations really are? We've included a comprehensive FLOPs benchmarking script!
+Want to see how fast these operations really are? We've included a comprehensive FLOPs benchmarking script that tests all operations with multiple precisions and compares eager mode with `torch.compile`.
 
 ### 🚀 Running the Benchmark
 
@@ -218,20 +218,27 @@ python benchmark_flops.py
 
 ### 📈 Performance Highlights
 
-Based on benchmarking with an RTX 3090:
+Based on benchmarking with an NVIDIA RTX 3090, here’s how `torch-point-ops` performs on a 1024x1024 point cloud configuration:
 
-| Operation | Point Cloud Size | Performance | Runtime |
-|-----------|------------------|-------------|---------|
-| **EMD** | 1024×512 points | **20.06 GFLOPS** | ~6.8ms |
-| **Chamfer** | 512×256 points | **10.45 GFLOPS** | ~0.18ms |
-| **KNN** | 1024×512 points, K=8 | **Auto-optimized** | <1ms |
+| Operation      | Precision | Mode    | Runtime (ms) | Speedup vs FP32 Eager | Notes                               |
+|----------------|-----------|---------|--------------|-----------------------|-------------------------------------|
+| **KNN (K=16)** | FP32      | Eager   | 3.377        | 1.0x                  | Baseline performance                |
+|                | **FP16**  | Eager   | **2.415**    | **1.4x**              | Faster with half precision          |
+|                | **FP16**  | Compile | **4.582**    | **~0.7x**             | `torch.compile` overhead observed   |
+| **Chamfer**    | FP32      | Eager   | 0.250        | 1.0x                  | Baseline performance                |
+|                | **FP16**  | Eager   | **0.941**    | **~0.3x**             | Slower with half precision          |
+|                | **FP16**  | Compile | **0.873**    | **~0.3x**             | `torch.compile` provides no benefit |
+| **EMD**        | FP32      | Eager   | 11.126       | 1.0x                  | Baseline, FP16 not recommended      |
+|                | FP32      | Compile | **10.107**   | **1.1x**              | `torch.compile` provides minor gains|
+
+*Runtimes are for a single forward pass. Speedups are calculated relative to the FP32 Eager implementation.*
 
 **Key Insights:**
-- 🎯 **EMD**: Consistent performance across input sizes, excellent for large point clouds
-- ⚡ **Chamfer**: Lightning-fast on asymmetric configurations, ideal for real-time applications  
-- 🚀 **KNN**: Multiple kernel versions with automatic selection for optimal performance across different problem sizes
-- 🔥 **GPU Scaling**: All operations show significant performance gains on larger inputs
-- 📊 **Efficiency**: Optimized CUDA kernels deliver maximum hardware utilization
+- 🚀 **Optimized Kernels**: Our custom CUDA kernels for KNN and Chamfer are already highly optimized, showing that `torch.compile` may add overhead in some cases.
+- ⚡ **Half-Precision (FP16)**: For KNN, half-precision provides a solid **1.4x speedup** in eager mode, making it ideal for memory-constrained and performance-critical applications.
+- 🎯 **EMD**: EMD sees a minor benefit from `torch.compile`, while half-precision is not recommended due to numerical stability.
+- 🔥 **GPU Scaling**: All operations show significant performance gains on larger inputs.
+- 📊 **Efficiency**: Optimized CUDA kernels deliver maximum hardware utilization, often outperforming generalized compilation approaches.
 
 *The benchmark script tests various configurations and provides detailed timing statistics, theoretical FLOP counts, and performance analysis.*
 
