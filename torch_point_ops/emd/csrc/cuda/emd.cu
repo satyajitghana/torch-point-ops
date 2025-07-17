@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <torch/all.h>
 #include <torch/library.h>
 #include <vector>
@@ -283,7 +284,7 @@ emd_cuda_forward(torch::Tensor xyz1, torch::Tensor xyz2) {
     auto match = torch::zeros({b, m, n}, xyz1.options());
     auto temp = torch::zeros({b, (n+m)*2}, xyz1.options());
 
-    AT_DISPATCH_FLOATING_TYPES(xyz1.scalar_type(), "emd_forward_approxmatch", ([&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(xyz1.scalar_type(), "emd_forward_approxmatch", ([&] {
         approxmatch<scalar_t><<<32,512>>>(
             b, n, m, xyz1.data_ptr<scalar_t>(), xyz2.data_ptr<scalar_t>(), match.data_ptr<scalar_t>(), temp.data_ptr<scalar_t>()
         );
@@ -291,7 +292,7 @@ emd_cuda_forward(torch::Tensor xyz1, torch::Tensor xyz2) {
 
     auto cost = torch::zeros({b}, xyz1.options());
 
-    AT_DISPATCH_FLOATING_TYPES(xyz1.scalar_type(), "emd_forward_matchcost", ([&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(xyz1.scalar_type(), "emd_forward_matchcost", ([&] {
         matchcost<scalar_t><<<32,512>>>(
             b, n, m, xyz1.data_ptr<scalar_t>(), xyz2.data_ptr<scalar_t>(), match.data_ptr<scalar_t>(), cost.data_ptr<scalar_t>()
         );
@@ -330,7 +331,7 @@ emd_cuda_backward(
     auto grad1 = torch::zeros_like(xyz1);
     auto grad2 = torch::zeros_like(xyz2);
 
-    AT_DISPATCH_FLOATING_TYPES(xyz1.scalar_type(), "emd_backward", ([&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(xyz1.scalar_type(), "emd_backward", ([&] {
         matchcostgrad1<scalar_t><<<32,512>>>(
             b, n, m, grad_cost.data_ptr<scalar_t>(), xyz1.data_ptr<scalar_t>(), xyz2.data_ptr<scalar_t>(), match.data_ptr<scalar_t>(), grad1.data_ptr<scalar_t>()
         );

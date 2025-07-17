@@ -30,8 +30,9 @@ torch.library.register_autograd(
 def _(xyz1, xyz2):
     batch_size, n, _ = xyz1.shape
     _, m, _ = xyz2.shape
-    dist1 = torch.empty(batch_size, n, device=xyz1.device, dtype=torch.float32)
-    dist2 = torch.empty(batch_size, m, device=xyz1.device, dtype=torch.float32)
+    # Use input dtype instead of hardcoding float32
+    dist1 = torch.empty(batch_size, n, device=xyz1.device, dtype=xyz1.dtype)
+    dist2 = torch.empty(batch_size, m, device=xyz1.device, dtype=xyz1.dtype)
     idx1 = torch.empty(batch_size, n, device=xyz1.device, dtype=torch.int32)
     idx2 = torch.empty(batch_size, m, device=xyz1.device, dtype=torch.int32)
     return dist1, dist2, idx1, idx2
