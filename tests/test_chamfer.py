@@ -72,53 +72,41 @@ class TestChamferDistance(TestCase):
             # Test CUDA with float64 (now supported by templated kernels)
             if torch.cuda.is_available():
                 p1_cuda = torch.randn(
-            1, 4, 3, 
-                    device="cuda", 
-            dtype=torch.float64, 
-            requires_grad=True
-        )
+                    1, 4, 3, device="cuda", dtype=torch.float64, requires_grad=True
+                )
                 p2_cuda = torch.randn(
-            1, 5, 3, 
-                    device="cuda", 
-            dtype=torch.float64, 
-            requires_grad=True
-        )
-        
+                    1, 5, 3, device="cuda", dtype=torch.float64, requires_grad=True
+                )
+
         # Test the chamfer distance function
         def chamfer_fn(p1, p2):
             return chamfer.chamfer_distance(p1, p2)
-        
+
             self.assertTrue(
                 torch.autograd.gradcheck(
                     chamfer_fn,
-                        (p1_cuda, p2_cuda),
-                        eps=1e-6,           # tighter eps for float64
-                        atol=1e-5,          # tighter tolerance for float64
-                        rtol=1e-4,          # tighter relative tolerance  
-                        nondet_tol=1e-5,    # tolerance for non-deterministic operations
-                    fast_mode=True,     # faster but less thorough checking
+                    (p1_cuda, p2_cuda),
+                    eps=1e-6,  # tighter eps for float64
+                    atol=1e-5,  # tighter tolerance for float64
+                    rtol=1e-4,  # tighter relative tolerance
+                    nondet_tol=1e-5,  # tolerance for non-deterministic operations
+                    fast_mode=True,  # faster but less thorough checking
                     check_batched_grad=False,  # disable for CUDA atomic ops
                 )
             )
 
             # Test CPU reference implementation separately with float64
             p1_cpu = torch.randn(
-            1, 4, 3, 
-                device="cpu", 
-            dtype=torch.float64, 
-            requires_grad=True
-        )
+                1, 4, 3, device="cpu", dtype=torch.float64, requires_grad=True
+            )
             p2_cpu = torch.randn(
-            1, 5, 3, 
-                device="cpu", 
-            dtype=torch.float64, 
-            requires_grad=True
-        )
-        
+                1, 5, 3, device="cpu", dtype=torch.float64, requires_grad=True
+            )
+
         def ref_chamfer_fn(p1, p2):
             dist1, dist2 = reference_chamfer_distance(p1, p2)
             return dist1.mean() + dist2.mean()
-        
+
             self.assertTrue(
                 torch.autograd.gradcheck(
                     ref_chamfer_fn,
@@ -136,26 +124,20 @@ class TestChamferDistance(TestCase):
         Now tests CUDA with float64 since it's supported.
         """
         model = ChamferDistance(reduction="mean")
-        
+
         def model_fn(p1, p2):
             return model(p1, p2)
-        
+
         with torch.backends.cudnn.flags(enabled=False):
             # Test CUDA with float64 (now supported)
             if torch.cuda.is_available():
                 p1_cuda = torch.randn(
-                    1, 3, 3, 
-                    device="cuda", 
-                    dtype=torch.float64, 
-                    requires_grad=True
+                    1, 3, 3, device="cuda", dtype=torch.float64, requires_grad=True
                 )
                 p2_cuda = torch.randn(
-                    1, 4, 3, 
-                    device="cuda", 
-                    dtype=torch.float64, 
-                    requires_grad=True
+                    1, 4, 3, device="cuda", dtype=torch.float64, requires_grad=True
                 )
-                
+
                 self.assertTrue(
                     torch.autograd.gradcheck(
                         model_fn,
@@ -166,8 +148,8 @@ class TestChamferDistance(TestCase):
                         nondet_tol=1e-5,
                         fast_mode=True,
                         check_batched_grad=False,
+                    )
                 )
-            )
 
     def test_gradients_vs_reference(self):
         device = "cuda"
@@ -382,44 +364,44 @@ class TestChamferDistance(TestCase):
         device = "cuda"
         if not torch.cuda.is_available():
             self.skipTest("CUDA not available")
-        
+
         # Test different precisions with appropriate tolerances
         precision_configs = [
             (torch.float16, 1e-2, 1e-1),  # half precision: loose tolerances
-            (torch.float32, 1e-5, 1e-3),  # single precision: medium tolerances  
+            (torch.float32, 1e-5, 1e-3),  # single precision: medium tolerances
             (torch.float64, 1e-8, 1e-6),  # double precision: tight tolerances
         ]
-        
+
         for dtype, atol, rtol in precision_configs:
             with self.subTest(dtype=dtype):
                 p1 = torch.randn(2, 10, 3, device=device, dtype=dtype)
                 p2 = torch.randn(2, 12, 3, device=device, dtype=dtype)
-                
+
                 # Test forward pass
                 dist1, dist2 = chamfer.chamfer_distance(p1, p2)
-                
+
                 # Verify output dtype matches input
                 self.assertEqual(dist1.dtype, dtype)
                 self.assertEqual(dist2.dtype, dtype)
-                
+
                 # Verify shapes
                 self.assertEqual(dist1.shape, (2, 10))
                 self.assertEqual(dist2.shape, (2, 12))
-                
+
                 # Test backward pass
                 p1_grad = p1.clone().requires_grad_(True)
                 p2_grad = p2.clone().requires_grad_(True)
-                
+
                 dist1_grad, dist2_grad = chamfer.chamfer_distance(p1_grad, p2_grad)
                 loss = dist1_grad.mean() + dist2_grad.mean()
                 loss.backward()
-                
+
                 # Verify gradients exist and are finite
                 self.assertIsNotNone(p1_grad.grad)
                 self.assertIsNotNone(p2_grad.grad)
                 self.assertTrue(torch.isfinite(p1_grad.grad).all())
                 self.assertTrue(torch.isfinite(p2_grad.grad).all())
-                
+
                 # Test module with different reductions
                 for reduction in ["mean", "sum", None]:
                     model = ChamferDistance(reduction=reduction)
@@ -438,11 +420,11 @@ class TestChamferDistance(TestCase):
         device = "cuda"
         if not torch.cuda.is_available():
             self.skipTest("CUDA not available")
-        
+
         # Test function
         def chamfer_fn(p1, p2):
             return chamfer.chamfer_distance(p1, p2)
-        
+
         with torch.backends.cudnn.flags(enabled=False):
             # Test different precisions with appropriate parameters
             precision_configs = [
@@ -450,12 +432,16 @@ class TestChamferDistance(TestCase):
                 (torch.float32, 1e-4, 1e-3, 1e-2, 1e-3),
                 (torch.float64, 1e-6, 1e-5, 1e-4, 1e-5),
             ]
-            
+
             for dtype, eps, atol, rtol, nondet_tol in precision_configs:
                 with self.subTest(dtype=dtype):
-                    p1 = torch.randn(1, 4, 3, device=device, dtype=dtype, requires_grad=True)
-                    p2 = torch.randn(1, 5, 3, device=device, dtype=dtype, requires_grad=True)
-                    
+                    p1 = torch.randn(
+                        1, 4, 3, device=device, dtype=dtype, requires_grad=True
+                    )
+                    p2 = torch.randn(
+                        1, 5, 3, device=device, dtype=dtype, requires_grad=True
+                    )
+
                     # For float16 and float32, gradcheck warns about non-double precision
                     # We test basic gradient flow instead of full numerical gradcheck
                     if dtype in [torch.float16, torch.float32]:
