@@ -5,6 +5,8 @@
 #include <vector>
 #include <tuple>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/OpMathType.h>
+#include <c10/cuda/CUDAMathCompat.h>
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.device().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
@@ -14,6 +16,7 @@ namespace torch_point_ops {
 
 template<typename scalar_t>
 __global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1,const scalar_t * __restrict__ xyz2,scalar_t * __restrict__ match,scalar_t * temp){
+	using opmath_t = at::opmath_type<scalar_t>;
 	scalar_t * remainL=temp+blockIdx.x*(n+m)*2, * remainR=temp+blockIdx.x*(n+m)*2+n,*ratioL=temp+blockIdx.x*(n+m)*2+n+m,*ratioR=temp+blockIdx.x*(n+m)*2+n+m+n;
 	scalar_t multiL,multiR;
 	if (n>=m){
@@ -34,19 +37,22 @@ __global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1
 			remainR[j]=multiR;
 		__syncthreads();
 		for (int j=7;j>=-2;j--){
-			scalar_t level=-powf(4.0f,j);
+			opmath_t level=-::pow(static_cast<opmath_t>(4.0f), static_cast<opmath_t>(j));
 			if (j==-2){
 				level=0;
 			}
+			
+
+			
 			for (int k0=0;k0<n;k0+=blockDim.x){
 				int k=k0+threadIdx.x;
-				scalar_t x1=0,y1=0,z1=0;
+				opmath_t x1=0,y1=0,z1=0;
 				if (k<n){
-					x1=xyz1[i*n*3+k*3+0];
-					y1=xyz1[i*n*3+k*3+1];
-					z1=xyz1[i*n*3+k*3+2];
+					x1=static_cast<opmath_t>(xyz1[i*n*3+k*3+0]);
+					y1=static_cast<opmath_t>(xyz1[i*n*3+k*3+1]);
+					z1=static_cast<opmath_t>(xyz1[i*n*3+k*3+2]);
 				}
-				scalar_t suml=1e-9f;
+				opmath_t suml = std::is_same_v<scalar_t, at::Half> ? static_cast<opmath_t>(1e-4f) : static_cast<opmath_t>(1e-9f);
 				for (int l0=0;l0<m;l0+=Block){
 					int lend=min(m,l0+Block)-l0;
 					for (int l=threadIdx.x;l<lend;l+=blockDim.x){
@@ -60,28 +66,44 @@ __global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1
 					}
 					__syncthreads();
 					for (int l=0;l<lend;l++){
-						scalar_t x2=buf[l*4+0];
-						scalar_t y2=buf[l*4+1];
-						scalar_t z2=buf[l*4+2];
-						scalar_t d=level*((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)+(z2-z1)*(z2-z1));
-						scalar_t w=__expf(d)*buf[l*4+3];
+						opmath_t x2=static_cast<opmath_t>(buf[l*4+0]);
+						opmath_t y2=static_cast<opmath_t>(buf[l*4+1]);
+						opmath_t z2=static_cast<opmath_t>(buf[l*4+2]);
+						opmath_t d=level*((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)+(z2-z1)*(z2-z1));
+						
+
+						
+						// Clamp exponential argument only for float16 to prevent extreme underflow/overflow
+						if (std::is_same_v<scalar_t, at::Half>) {
+							d = d < static_cast<opmath_t>(-20.0f) ? static_cast<opmath_t>(-20.0f) : 
+							    (d > static_cast<opmath_t>(20.0f) ? static_cast<opmath_t>(20.0f) : d);
+						}
+						
+						opmath_t w=::exp(d)*static_cast<opmath_t>(buf[l*4+3]);
+						
 						suml+=w;
 					}
 					__syncthreads();
 				}
-				if (k<n)
-					ratioL[k]=remainL[k]/suml;
+				if (k<n) {
+					opmath_t epsilon = std::is_same_v<scalar_t, at::Half> ? static_cast<opmath_t>(1e-4f) : static_cast<opmath_t>(1e-9f);
+					opmath_t ratio = static_cast<opmath_t>(remainL[k])/(suml + epsilon);
+					
+
+					
+					ratioL[k]=static_cast<scalar_t>(ratio);
+				}
 			}
 			__syncthreads();
 			for (int l0=0;l0<m;l0+=blockDim.x){
 				int l=l0+threadIdx.x;
-				scalar_t x2=0,y2=0,z2=0;
+				opmath_t x2=0,y2=0,z2=0;
 				if (l<m){
-					x2=xyz2[i*m*3+l*3+0];
-					y2=xyz2[i*m*3+l*3+1];
-					z2=xyz2[i*m*3+l*3+2];
+					x2=static_cast<opmath_t>(xyz2[i*m*3+l*3+0]);
+					y2=static_cast<opmath_t>(xyz2[i*m*3+l*3+1]);
+					z2=static_cast<opmath_t>(xyz2[i*m*3+l*3+2]);
 				}
-				scalar_t sumr=0;
+				opmath_t sumr=0;
 				for (int k0=0;k0<n;k0+=Block){
 					int kend=min(n,k0+Block)-k0;
 					for (int k=threadIdx.x;k<kend;k+=blockDim.x){
@@ -92,31 +114,38 @@ __global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1
 					}
 					__syncthreads();
 					for (int k=0;k<kend;k++){
-						scalar_t x1=buf[k*4+0];
-						scalar_t y1=buf[k*4+1];
-						scalar_t z1=buf[k*4+2];
-						scalar_t w=__expf(level*((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)+(z2-z1)*(z2-z1)))*buf[k*4+3];
+						opmath_t x1=static_cast<opmath_t>(buf[k*4+0]);
+						opmath_t y1=static_cast<opmath_t>(buf[k*4+1]);
+						opmath_t z1=static_cast<opmath_t>(buf[k*4+2]);
+						opmath_t d=level*((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)+(z2-z1)*(z2-z1));
+						// Clamp exponential argument only for float16 to prevent extreme underflow/overflow
+						if (std::is_same_v<scalar_t, at::Half>) {
+							d = d < static_cast<opmath_t>(-20.0f) ? static_cast<opmath_t>(-20.0f) : 
+							    (d > static_cast<opmath_t>(20.0f) ? static_cast<opmath_t>(20.0f) : d);
+						}
+						opmath_t w=::exp(d)*static_cast<opmath_t>(buf[k*4+3]);
 						sumr+=w;
 					}
 					__syncthreads();
 				}
 				if (l<m){
-					sumr*=remainR[l];
-					scalar_t consumption=fminf(remainR[l]/(sumr+1e-9f),1.0f);
-					ratioR[l]=consumption*remainR[l];
-					remainR[l]=fmaxf(0.0f,remainR[l]-sumr);
+					sumr*=static_cast<opmath_t>(remainR[l]);
+					opmath_t epsilon = std::is_same_v<scalar_t, at::Half> ? static_cast<opmath_t>(1e-4f) : static_cast<opmath_t>(1e-9f);
+					opmath_t consumption=fminf(static_cast<opmath_t>(remainR[l])/(sumr+epsilon),1.0f);
+					ratioR[l]=static_cast<scalar_t>(consumption*static_cast<opmath_t>(remainR[l]));
+					remainR[l]=static_cast<scalar_t>(fmaxf(0.0f,static_cast<opmath_t>(remainR[l])-sumr));
 				}
 			}
 			__syncthreads();
 			for (int k0=0;k0<n;k0+=blockDim.x){
 				int k=k0+threadIdx.x;
-				scalar_t x1=0,y1=0,z1=0;
+				opmath_t x1=0,y1=0,z1=0;
 				if (k<n){
-					x1=xyz1[i*n*3+k*3+0];
-					y1=xyz1[i*n*3+k*3+1];
-					z1=xyz1[i*n*3+k*3+2];
+					x1=static_cast<opmath_t>(xyz1[i*n*3+k*3+0]);
+					y1=static_cast<opmath_t>(xyz1[i*n*3+k*3+1]);
+					z1=static_cast<opmath_t>(xyz1[i*n*3+k*3+2]);
 				}
-				scalar_t suml=0;
+				opmath_t suml=0;
 				for (int l0=0;l0<m;l0+=Block){
 					int lend=min(m,l0+Block)-l0;
 					for (int l=threadIdx.x;l<lend;l+=blockDim.x){
@@ -126,21 +155,27 @@ __global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1
 						buf[l*4+3]=ratioR[l0+l];
 					}
 					__syncthreads();
-					scalar_t rl=ratioL[k];
+					opmath_t rl=static_cast<opmath_t>(ratioL[k]);
 					if (k<n){
 						for (int l=0;l<lend;l++){
-							scalar_t x2=buf[l*4+0];
-							scalar_t y2=buf[l*4+1];
-							scalar_t z2=buf[l*4+2];
-							scalar_t w=__expf(level*((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)+(z2-z1)*(z2-z1)))*rl*buf[l*4+3];
-							match[i*n*m+(l0+l)*n+k]+=w;
+							opmath_t x2=static_cast<opmath_t>(buf[l*4+0]);
+							opmath_t y2=static_cast<opmath_t>(buf[l*4+1]);
+							opmath_t z2=static_cast<opmath_t>(buf[l*4+2]);
+							opmath_t d=level*((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)+(z2-z1)*(z2-z1));
+							// Clamp exponential argument only for float16 to prevent extreme underflow/overflow
+							if (std::is_same_v<scalar_t, at::Half>) {
+								d = d < static_cast<opmath_t>(-20.0f) ? static_cast<opmath_t>(-20.0f) : 
+								    (d > static_cast<opmath_t>(20.0f) ? static_cast<opmath_t>(20.0f) : d);
+							}
+							opmath_t w=::exp(d)*rl*static_cast<opmath_t>(buf[l*4+3]);
+							match[i*n*m+(l0+l)*n+k]+=static_cast<scalar_t>(w);
 							suml+=w;
 						}
 					}
 					__syncthreads();
 				}
 				if (k<n)
-					remainL[k]=fmaxf(0.0f,remainL[k]-suml);
+					remainL[k]=static_cast<scalar_t>(fmaxf(0.0f,static_cast<opmath_t>(remainL[k])-suml));
 			}
 			__syncthreads();
 		}
@@ -150,18 +185,19 @@ __global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1
 
 template<typename scalar_t>
 __global__ void matchcost(int b,int n,int m,const scalar_t * __restrict__ xyz1,const scalar_t * __restrict__ xyz2,const scalar_t * __restrict__ match,scalar_t * __restrict__ out){
-	__shared__ scalar_t allsum[512];
+	using opmath_t = at::opmath_type<scalar_t>;
+	__shared__ opmath_t allsum[512];
 	const int Block=1024;
 	__shared__ scalar_t buf[Block*3];
 	for (int i=blockIdx.x;i<b;i+=gridDim.x){
-		scalar_t subsum=0;
+		opmath_t subsum=0;
 		for (int k0=0;k0<n;k0+=blockDim.x){
 			int k=k0+threadIdx.x;
-			scalar_t x1=0,y1=0,z1=0;
+			opmath_t x1=0,y1=0,z1=0;
 			if (k<n){
-				x1=xyz1[i*n*3+k*3+0];
-				y1=xyz1[i*n*3+k*3+1];
-				z1=xyz1[i*n*3+k*3+2];
+				x1=static_cast<opmath_t>(xyz1[i*n*3+k*3+0]);
+				y1=static_cast<opmath_t>(xyz1[i*n*3+k*3+1]);
+				z1=static_cast<opmath_t>(xyz1[i*n*3+k*3+2]);
 			}
 			for (int l0=0;l0<m;l0+=Block){
 				int lend=min(m,l0+Block)-l0;
@@ -170,11 +206,11 @@ __global__ void matchcost(int b,int n,int m,const scalar_t * __restrict__ xyz1,c
 				__syncthreads();
 				if (k<n){
 					for (int l=0;l<lend;l++){
-						scalar_t x2=buf[l*3+0];
-						scalar_t y2=buf[l*3+1];
-						scalar_t z2=buf[l*3+2];
-						scalar_t d=(x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)+(z2-z1)*(z2-z1);
-						subsum+=d*match[i*n*m+(l0+l)*n+k];
+						opmath_t x2=static_cast<opmath_t>(buf[l*3+0]);
+						opmath_t y2=static_cast<opmath_t>(buf[l*3+1]);
+						opmath_t z2=static_cast<opmath_t>(buf[l*3+2]);
+						opmath_t d=(x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)+(z2-z1)*(z2-z1);
+						subsum+=d*static_cast<opmath_t>(match[i*n*m+(l0+l)*n+k]);
 					}
 				}
 				__syncthreads();
@@ -188,7 +224,7 @@ __global__ void matchcost(int b,int n,int m,const scalar_t * __restrict__ xyz1,c
 			}
 		}
 		if (threadIdx.x==0)
-			out[i]=allsum[0];
+			out[i]=static_cast<scalar_t>(allsum[0]);
 		__syncthreads();
 	}
 }
@@ -196,24 +232,26 @@ __global__ void matchcost(int b,int n,int m,const scalar_t * __restrict__ xyz1,c
 
 template<typename scalar_t>
 __global__ void matchcostgrad1(int b,int n,int m,const scalar_t * __restrict__ grad_cost,const scalar_t * __restrict__ xyz1,const scalar_t * __restrict__ xyz2,const scalar_t * __restrict__ match,scalar_t * __restrict__ grad1){
+	using opmath_t = at::opmath_type<scalar_t>;
 	for (int i=blockIdx.x;i<b;i+=gridDim.x){
 		for (int l=threadIdx.x;l<n;l+=blockDim.x){
-			scalar_t x1=xyz1[i*n*3+l*3+0];
-			scalar_t y1=xyz1[i*n*3+l*3+1];
-			scalar_t z1=xyz1[i*n*3+l*3+2];
-			scalar_t dx=0,dy=0,dz=0;
+			opmath_t x1=static_cast<opmath_t>(xyz1[i*n*3+l*3+0]);
+			opmath_t y1=static_cast<opmath_t>(xyz1[i*n*3+l*3+1]);
+			opmath_t z1=static_cast<opmath_t>(xyz1[i*n*3+l*3+2]);
+			opmath_t dx=0,dy=0,dz=0;
 			for (int k=0;k<m;k++){
-				scalar_t x2=xyz2[i*m*3+k*3+0];
-				scalar_t y2=xyz2[i*m*3+k*3+1];
-				scalar_t z2=xyz2[i*m*3+k*3+2];
-				scalar_t d=match[i*n*m+k*n+l]*2;
+				opmath_t x2=static_cast<opmath_t>(xyz2[i*m*3+k*3+0]);
+				opmath_t y2=static_cast<opmath_t>(xyz2[i*m*3+k*3+1]);
+				opmath_t z2=static_cast<opmath_t>(xyz2[i*m*3+k*3+2]);
+				opmath_t d=static_cast<opmath_t>(match[i*n*m+k*n+l])*2;
 				dx+=(x1-x2)*d;
 				dy+=(y1-y2)*d;
 				dz+=(z1-z2)*d;
 			}
-			grad1[i*n*3+l*3+0]=dx*grad_cost[i];
-			grad1[i*n*3+l*3+1]=dy*grad_cost[i];
-			grad1[i*n*3+l*3+2]=dz*grad_cost[i];
+			opmath_t grad_cost_i = static_cast<opmath_t>(grad_cost[i]);
+			grad1[i*n*3+l*3+0]=static_cast<scalar_t>(dx*grad_cost_i);
+			grad1[i*n*3+l*3+1]=static_cast<scalar_t>(dy*grad_cost_i);
+			grad1[i*n*3+l*3+2]=static_cast<scalar_t>(dz*grad_cost_i);
 		}
 	}
 }
@@ -221,20 +259,21 @@ __global__ void matchcostgrad1(int b,int n,int m,const scalar_t * __restrict__ g
 
 template<typename scalar_t>
 __global__ void matchcostgrad2(int b,int n,int m,const scalar_t * __restrict__ grad_cost,const scalar_t * __restrict__ xyz1,const scalar_t * __restrict__ xyz2,const scalar_t * __restrict__ match,scalar_t * __restrict__ grad2){
-	__shared__ scalar_t sum_grad[256*3];
+	using opmath_t = at::opmath_type<scalar_t>;
+	__shared__ opmath_t sum_grad[256*3];
 	for (int i=blockIdx.x;i<b;i+=gridDim.x){
 		int kbeg=m*blockIdx.y/gridDim.y;
 		int kend=m*(blockIdx.y+1)/gridDim.y;
 		for (int k=kbeg;k<kend;k++){
-			scalar_t x2=xyz2[(i*m+k)*3+0];
-			scalar_t y2=xyz2[(i*m+k)*3+1];
-			scalar_t z2=xyz2[(i*m+k)*3+2];
-			scalar_t subsumx=0,subsumy=0,subsumz=0;
+			opmath_t x2=static_cast<opmath_t>(xyz2[(i*m+k)*3+0]);
+			opmath_t y2=static_cast<opmath_t>(xyz2[(i*m+k)*3+1]);
+			opmath_t z2=static_cast<opmath_t>(xyz2[(i*m+k)*3+2]);
+			opmath_t subsumx=0,subsumy=0,subsumz=0;
 			for (int j=threadIdx.x;j<n;j+=blockDim.x){
-				scalar_t x1=x2-xyz1[(i*n+j)*3+0];
-				scalar_t y1=y2-xyz1[(i*n+j)*3+1];
-				scalar_t z1=z2-xyz1[(i*n+j)*3+2];
-				scalar_t d=match[i*n*m+k*n+j]*2;
+				opmath_t x1=x2-static_cast<opmath_t>(xyz1[(i*n+j)*3+0]);
+				opmath_t y1=y2-static_cast<opmath_t>(xyz1[(i*n+j)*3+1]);
+				opmath_t z1=z2-static_cast<opmath_t>(xyz1[(i*n+j)*3+2]);
+				opmath_t d=static_cast<opmath_t>(match[i*n*m+k*n+j])*2;
 				subsumx+=x1*d;
 				subsumy+=y1*d;
 				subsumz+=z1*d;
@@ -253,9 +292,10 @@ __global__ void matchcostgrad2(int b,int n,int m,const scalar_t * __restrict__ g
 				}
 			}
 			if (threadIdx.x==0){
-				grad2[(i*m+k)*3+0]=sum_grad[0]*grad_cost[i];
-				grad2[(i*m+k)*3+1]=sum_grad[1]*grad_cost[i];
-				grad2[(i*m+k)*3+2]=sum_grad[2]*grad_cost[i];
+				opmath_t grad_cost_i = static_cast<opmath_t>(grad_cost[i]);
+				grad2[(i*m+k)*3+0]=static_cast<scalar_t>(sum_grad[0]*grad_cost_i);
+				grad2[(i*m+k)*3+1]=static_cast<scalar_t>(sum_grad[1]*grad_cost_i);
+				grad2[(i*m+k)*3+2]=static_cast<scalar_t>(sum_grad[2]*grad_cost_i);
 			}
 			__syncthreads();
 		}
