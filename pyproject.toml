@@ -35,7 +35,7 @@ no-build-isolation = true
 package = false
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "torch>=2.7.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
