@@ -2,10 +2,39 @@
 
 #include <cuda_runtime.h>
 #include <algorithm>
+#include <limits>
 
-#ifndef CUDA_INF
-#define CUDA_INF __int_as_float(0x7f800000)
+// Helper to get infinity for different types
+template<typename T>
+struct NumericLimits {
+    __device__ __forceinline__ static T lower_bound() {
+        return std::numeric_limits<T>::lowest();
+    }
+    __device__ __forceinline__ static T upper_bound() {
+        return std::numeric_limits<T>::max();
+    }
+    __device__ __forceinline__ static T inf() {
+        return std::numeric_limits<T>::infinity();
+    }
+};
+
+// Specializations for half and bfloat16 if necessary
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530
+#include <cuda_fp16.h>
+template<>
+struct NumericLimits<__half> {
+    __device__ __forceinline__ static __half lower_bound() {
+        return __float2half_rn(-65504.0f);
+    }
+    __device__ __forceinline__ static __half upper_bound() {
+        return __float2half_rn(65504.0f);
+    }
+    __device__ __forceinline__ static __half inf() {
+        return __float2half_rn(std::numeric_limits<float>::infinity());
+    }
+};
 #endif
+
 
 namespace torch_point_ops {
 
@@ -18,7 +47,7 @@ public:
     dists_(dists), idxs_(idxs), K_(K), size_(0) {
     // Initialize with infinity
     for (int i = 0; i < K_; ++i) {
-      dists_[i] = INFINITY;
+      dists_[i] = NumericLimits<scalar_t>::inf();
       idxs_[i] = -1;
     }
   }
@@ -66,7 +95,7 @@ public:
     dists_(dists), idxs_(idxs), size_(0) {
     // Initialize arrays
     for (int i = 0; i < K; ++i) {
-      local_dists_[i] = INFINITY;
+      local_dists_[i] = NumericLimits<scalar_t>::inf();
       local_idxs_[i] = -1;
     }
   }
@@ -118,7 +147,7 @@ template<typename scalar_t, typename index_t>
 class RegisterMinK<scalar_t, index_t, 1> {
 public:
   __device__ RegisterMinK(scalar_t* dists, index_t* idxs) : 
-    dists_(dists), idxs_(idxs), min_dist_(INFINITY), min_idx_(-1), size_(0) {}
+    dists_(dists), idxs_(idxs), min_dist_(NumericLimits<scalar_t>::inf()), min_idx_(-1), size_(0) {}
 
   __device__ void add(scalar_t dist, index_t idx) {
     if (size_ == 0 || dist < min_dist_) {
@@ -151,7 +180,7 @@ class RegisterMinK<scalar_t, index_t, 2> {
 public:
   __device__ RegisterMinK(scalar_t* dists, index_t* idxs) : 
     dists_(dists), idxs_(idxs), size_(0) {
-    min_dists_[0] = min_dists_[1] = INFINITY;
+    min_dists_[0] = min_dists_[1] = NumericLimits<scalar_t>::inf();
     min_idxs_[0] = min_idxs_[1] = -1;
   }
 

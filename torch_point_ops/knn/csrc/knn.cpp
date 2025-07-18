@@ -61,9 +61,9 @@ std::tuple<torch::Tensor, torch::Tensor> knn_cpu_forward(
         std::priority_queue<std::tuple<scalar_t, int>> q;
         
         for (int64_t i2 = 0; i2 < length2; ++i2) {
-          float dist = 0.0f;
+          scalar_t dist = 0;
           for (int d = 0; d < D; ++d) {
-            float diff = static_cast<float>(p1_a[n][i1][d] - p2_a[n][i2][d]);
+            scalar_t diff = p1_a[n][i1][d] - p2_a[n][i2][d];
             if (norm == 1) {
               dist += std::abs(diff);
             } else { // norm is 2 (default)
@@ -72,8 +72,8 @@ std::tuple<torch::Tensor, torch::Tensor> knn_cpu_forward(
           }
           
           int size = static_cast<int>(q.size());
-          if (size < K || dist < static_cast<float>(std::get<0>(q.top()))) {
-            q.emplace(static_cast<scalar_t>(dist), i2);
+          if (size < K || dist < std::get<0>(q.top())) {
+            q.emplace(dist, i2);
             if (size >= K) {
               q.pop();
             }
@@ -141,19 +141,19 @@ std::tuple<torch::Tensor, torch::Tensor> knn_cpu_backward(
           }
           
           for (int64_t d = 0; d < D; ++d) {
-            float p1_val = static_cast<float>(p1_a[n][i1][d]);
-            float p2_val = static_cast<float>(p2_a[n][i2][d]);
-            float grad_dist_val = static_cast<float>(grad_dists_a[n][i1][k]);
-            float diff = 0.0f;
+            scalar_t p1_val = p1_a[n][i1][d];
+            scalar_t p2_val = p2_a[n][i2][d];
+            scalar_t grad_dist_val = grad_dists_a[n][i1][k];
+            scalar_t diff = 0;
 
             if (norm == 1) {
-              float sign = (p1_val > p2_val) ? 1.0f : -1.0f;
+              scalar_t sign = (p1_val > p2_val) ? 1.0 : -1.0;
               diff = grad_dist_val * sign;
             } else { // norm is 2 (default)
-              diff = 2.0f * grad_dist_val * (p1_val - p2_val);
+              diff = 2.0 * grad_dist_val * (p1_val - p2_val);
             }
-            grad_p1_a[n][i1][d] += static_cast<scalar_t>(diff);
-            grad_p2_a[n][i2][d] -= static_cast<scalar_t>(diff);
+            grad_p1_a[n][i1][d] += diff;
+            grad_p2_a[n][i2][d] -= diff;
           }
         }
       }

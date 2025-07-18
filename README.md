@@ -218,27 +218,32 @@ python benchmark_flops.py
 
 ### 📈 Performance Highlights
 
-Based on benchmarking with an NVIDIA RTX 3090, here’s how `torch-point-ops` performs on a 1024x1024 point cloud configuration:
+The following table shows the performance for the `B16_N2048_M2048` configuration on an NVIDIA GeForce RTX 3090. `torch.compile` with `reduce-overhead` or `max-autotune` modes can provide significant speedups, especially for EMD.
 
-| Operation      | Precision | Mode    | Runtime (ms) | Speedup vs FP32 Eager | Notes                               |
-|----------------|-----------|---------|--------------|-----------------------|-------------------------------------|
-| **KNN (K=16)** | FP32      | Eager   | 3.377        | 1.0x                  | Baseline performance                |
-|                | **FP16**  | Eager   | **2.415**    | **1.4x**              | Faster with half precision          |
-|                | **FP16**  | Compile | **4.582**    | **~0.7x**             | `torch.compile` overhead observed   |
-| **Chamfer**    | FP32      | Eager   | 0.250        | 1.0x                  | Baseline performance                |
-|                | **FP16**  | Eager   | **0.941**    | **~0.3x**             | Slower with half precision          |
-|                | **FP16**  | Compile | **0.873**    | **~0.3x**             | `torch.compile` provides no benefit |
-| **EMD**        | FP32      | Eager   | 11.126       | 1.0x                  | Baseline, FP16 not recommended      |
-|                | FP32      | Compile | **10.107**   | **1.1x**              | `torch.compile` provides minor gains|
+| Operation      | Precision | Mode                      | Runtime (ms) | Speedup vs Eager |
+|----------------|-----------|---------------------------|--------------|------------------|
+| **KNN (K=16)** | FP16      | Compile (default)         | 1.173        | 0.94x            |
+| **KNN (K=16)** | FP16      | Compile (max-autotune)    | 1.184        | 0.93x            |
+| **KNN (K=16)** | FP16      | Compile (reduce-overhead) | 1.173        | 0.94x            |
+| **KNN (K=16)** | FP16      | Eager                     | 1.106        | 1.00x            |
+| **KNN (K=16)** | FP32      | Compile (default)         | 0.995        | 0.95x            |
+| **KNN (K=16)** | FP32      | Compile (max-autotune)    | 0.972        | 0.97x            |
+| **KNN (K=16)** | FP32      | Compile (reduce-overhead) | 1.021        | 0.92x            |
+| **KNN (K=16)** | FP32      | Eager                     | 0.943        | 1.00x            |
+| **Chamfer**    | FP16      | Compile (default)         | 0.558        | 1.00x            |
+| **Chamfer**    | FP16      | Compile (max-autotune)    | 0.557        | 1.00x            |
+| **Chamfer**    | FP16      | Compile (reduce-overhead) | 0.558        | 1.00x            |
+| **Chamfer**    | FP16      | Eager                     | 0.556        | 1.00x            |
+| **Chamfer**    | FP32      | Compile (default)         | 0.233        | 0.98x            |
+| **Chamfer**    | FP32      | Compile (max-autotune)    | 0.230        | 0.99x            |
+| **Chamfer**    | FP32      | Compile (reduce-overhead) | 0.133        | 1.71x            |
+| **Chamfer**    | FP32      | Eager                     | 0.228        | 1.00x            |
+| **EMD**        | FP32      | Compile (default)         | 32.378       | 1.00x            |
+| **EMD**        | FP32      | Compile (max-autotune)    | 0.326        | 99.28x           |
+| **EMD**        | FP32      | Compile (reduce-overhead) | 0.328        | 98.68x           |
+| **EMD**        | FP32      | Eager                     | 32.366       | 1.00x            |
 
-*Runtimes are for a single forward pass. Speedups are calculated relative to the FP32 Eager implementation.*
-
-**Key Insights:**
-- 🚀 **Optimized Kernels**: Our custom CUDA kernels for KNN and Chamfer are already highly optimized, showing that `torch.compile` may add overhead in some cases.
-- ⚡ **Half-Precision (FP16)**: For KNN, half-precision provides a solid **1.4x speedup** in eager mode, making it ideal for memory-constrained and performance-critical applications.
-- 🎯 **EMD**: EMD sees a minor benefit from `torch.compile`, while half-precision is not recommended due to numerical stability.
-- 🔥 **GPU Scaling**: All operations show significant performance gains on larger inputs.
-- 📊 **Efficiency**: Optimized CUDA kernels deliver maximum hardware utilization, often outperforming generalized compilation approaches.
+*Runtimes are for a single forward pass on an NVIDIA GPU. Speedup is relative to the Eager mode of the same precision.*
 
 *The benchmark script tests various configurations and provides detailed timing statistics, theoretical FLOP counts, and performance analysis.*
 

@@ -116,9 +116,15 @@ def knn_points(
             mask = mask[:, None].expand(-1, P1, -1)
             # mask has shape [N, P1, K], true where dists irrelevant
             dists_copy = dists.clone()
-            dists_copy[mask] = float("inf")
+            # Use dtype-preserving infinity constant
+            inf_value = torch.tensor(
+                float("inf"), dtype=dists.dtype, device=dists.device
+            )
+            dists_copy[mask] = inf_value
             dists_sorted, sort_idx = dists_copy.sort(dim=2)
-            dists_sorted[mask] = 0
+            # Use dtype-preserving zero constant
+            zero_value = torch.tensor(0, dtype=dists.dtype, device=dists.device)
+            dists_sorted[mask] = zero_value
             dists = dists_sorted
         else:
             dists, sort_idx = dists.sort(dim=2)
@@ -170,7 +176,9 @@ def knn_gather(
         # expand mask to shape [N, L, K, U]
         mask = mask[:, None].expand(-1, L, -1)
         mask = mask[:, :, :, None].expand(-1, -1, -1, U)
-        x_out[mask] = 0.0
+        # Use dtype-preserving zero constant
+        zero_value = torch.tensor(0, dtype=x.dtype, device=x.device)
+        x_out[mask] = zero_value
 
     return x_out
 

@@ -9,7 +9,7 @@ This script benchmarks the computational cost (FLOPs) and runtime of:
 
 It supports:
 - Different floating point precisions (float32, float16)
-- Eager mode vs. torch.compile()
+- Eager mode vs. torch.compile() with different modes
 - Various point cloud sizes
 
 Usage: python benchmark_flops.py
@@ -19,7 +19,7 @@ import torch
 import time
 import numpy as np
 import pandas as pd
-from typing import Tuple, Dict, Callable
+from typing import Tuple, Dict, Callable, Any
 import sys
 
 # Add a try-except block for imports
@@ -33,15 +33,6 @@ except ImportError as e:
         "Make sure the package is installed in your environment. Run `pip install -e .`"
     )
     sys.exit(1)
-
-# fvcore is optional
-try:
-    from fvcore.nn import flop_count
-
-    FVCORE_AVAILABLE = True
-except ImportError:
-    # print("Warning: fvcore not available for FLOP counting. Install with: pip install fvcore")
-    FVCORE_AVAILABLE = False
 
 
 def generate_point_clouds(
@@ -98,8 +89,8 @@ def benchmark_operation(
     p2: torch.Tensor,
     op_name: str,
     config_details: Dict,
-    num_warmup: int = 20,
-    num_runs: int = 100,
+    num_warmup: int = 5,
+    num_runs: int = 20,
 ) -> Dict[str, float]:
     """Generic benchmark for a point cloud operation."""
     device = p1.device
@@ -118,39 +109,33 @@ def benchmark_operation(
 
     theoretical_flops_per_batch = theoretical_flops * batch_size
 
-    # Compile if needed
-    if config_details["Mode"] == "Compile":
-        try:
-            op_func = torch.compile(op_func)
-        except Exception as e:
-            print(f"torch.compile failed for {op_name}: {e}")
-            return None
-
     # Warmup
     for _ in range(num_warmup):
         with torch.no_grad():
             _ = op_func(p1, p2)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
+    torch.cuda.synchronize()
 
-    # Benchmark runtime
-    times = []
+    # Benchmark runtime using CUDA events for precision
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+
+    start_event.record()
     for _ in range(num_runs):
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        start_time = time.perf_counter()
         with torch.no_grad():
             _ = op_func(p1, p2)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        end_time = time.perf_counter()
-        times.append(end_time - start_time)
+    end_event.record()
+    torch.cuda.synchronize()
 
-    mean_time = np.mean(times)
-    gflops = (theoretical_flops_per_batch / mean_time) / 1e9 if mean_time > 0 else 0
+    mean_time_ms = start_event.elapsed_time(end_event) / num_runs
+
+    gflops = (
+        (theoretical_flops_per_batch / (mean_time_ms / 1000)) / 1e9
+        if mean_time_ms > 0
+        else 0
+    )
 
     return {
-        "Mean Time (ms)": mean_time * 1000,
+        "Mean Time (ms)": mean_time_ms,
         "GFLOPS": gflops,
         "Theoretical FLOPs": theoretical_flops_per_batch,
     }
@@ -170,22 +155,48 @@ def main():
     print(f"Using GPU: {torch.cuda.get_device_name(0)}")
 
     # --- Configurations ---
-    # Size configs: (batch_size, n_points, m_points)
+    # Larger sizes for more meaningful benchmarks
     size_configs = [
-        (1, 128, 128),
-        (1, 512, 512),
-        (1, 1024, 1024),
-        (1, 2048, 2048),
-        (1, 1024, 2048),  # Asymmetric
+        (64, 512, 512),
+        (32, 1024, 1024),
+        (16, 2048, 2048),
     ]
     # Precision configs
     dtypes = [torch.float32, torch.float16]
     # Mode configs
-    modes = ["Eager", "Compile"]
+    modes = [
+        ("Eager", {}),
+        ("Compile (default)", {"mode": "default"}),
+        ("Compile (reduce-overhead)", {"mode": "reduce-overhead"}),
+        ("Compile (max-autotune)", {"mode": "max-autotune"}),
+    ]
     # KNN K values
     k_values = [1, 8, 16]
 
     all_results = []
+
+    # Define operations to benchmark
+    base_ops = {
+        "EMD": earth_movers_distance,
+        "Chamfer": chamfer_distance,
+    }
+    for k in k_values:
+        base_ops[f"KNN_K{k}"] = lambda p1, p2, k=k: knn_points(p1, p2, K=k)
+
+    # Pre-compile all function variants
+    compiled_ops = {}
+    for op_key, op_func_base in base_ops.items():
+        for mode_name, mode_config in modes:
+            if "Compile" not in mode_name:
+                continue
+
+            compile_key = (op_key, mode_name)
+            print(f"Compiling {op_key} with mode: {mode_name}...")
+            try:
+                compiled_ops[compile_key] = torch.compile(op_func_base, **mode_config)
+            except Exception as e:
+                print(f"  Failed to compile: {e}")
+                compiled_ops[compile_key] = None
 
     # --- Main Loop ---
     for batch_size, n_points, m_points in size_configs:
@@ -198,45 +209,38 @@ def main():
                 batch_size, n_points, m_points, dtype, device
             )
 
-            for mode in modes:
-                # EMD and Chamfer
-                for op_name, op_func_base in [
-                    ("EMD", earth_movers_distance),
-                    ("Chamfer", chamfer_distance),
-                ]:
-                    # EMD does not support half precision well
-                    if op_name == "EMD" and dtype == torch.float16:
-                        continue
-
-                    config_details = {
-                        "Operation": op_name,
-                        "Config": size_str,
-                        "Precision": dtype_str,
-                        "Mode": mode,
-                        "K": "N/A",
-                    }
-                    print(f"  Benchmarking: {op_name} ({dtype_str}, {mode})")
-                    result = benchmark_operation(
-                        op_func_base, p1, p2, op_name, config_details
-                    )
-                    if result:
-                        all_results.append({**config_details, **result})
-
-                # KNN
-                for k in k_values:
+            for op_key, op_func_base in base_ops.items():
+                if op_key.startswith("KNN"):
                     op_name = "KNN"
-                    op_func_knn = lambda p1, p2: knn_points(p1, p2, K=k)
+                    k = int(op_key.split("_K")[1])
+                else:
+                    op_name = op_key
+                    k = "N/A"
 
+                if op_name == "EMD" and dtype == torch.float16:
+                    continue
+
+                for mode_name, mode_config in modes:
                     config_details = {
                         "Operation": op_name,
                         "Config": size_str,
                         "Precision": dtype_str,
-                        "Mode": mode,
+                        "Mode": mode_name,
                         "K": k,
                     }
-                    print(f"  Benchmarking: {op_name} (K={k}, {dtype_str}, {mode})")
+                    print(
+                        f"  Benchmarking: {op_name} (K={k}, {dtype_str}, {mode_name})"
+                    )
+
+                    if "Compile" in mode_name:
+                        op_func = compiled_ops.get((op_key, mode_name))
+                        if op_func is None:
+                            continue
+                    else:
+                        op_func = op_func_base
+
                     result = benchmark_operation(
-                        op_func_knn, p1, p2, op_name, config_details
+                        op_func, p1, p2, op_name, config_details
                     )
                     if result:
                         all_results.append({**config_details, **result})
@@ -272,102 +276,75 @@ def main():
     print("README Performance Highlights (Markdown)")
     print("=" * 80)
 
-    # Filter for key results to highlight
-    fp32_eager = df[(df["Precision"] == "FP32") & (df["Mode"] == "Eager")]
-    fp16_eager = df[(df["Precision"] == "FP16") & (df["Mode"] == "Eager")]
-    fp32_compiled = df[(df["Precision"] == "FP32") & (df["Mode"] == "Compile")]
-    fp16_compiled = df[(df["Precision"] == "FP16") & (df["Mode"] == "Compile")]
+    # Filter for a specific, representative configuration
+    highlight_config = "B16_N2048_M2048"
+    df_highlight = df[df["Config"] == highlight_config].copy()
 
-    def get_best_time(df_slice):
-        if df_slice.empty:
-            return "N/A"
-        return df_slice["Mean Time (ms)"].iloc[0]
+    if df_highlight.empty:
+        print(f"No results found for highlight configuration: {highlight_config}")
+        return
 
-    highlight_config = "B1_N1024_M1024"
+    # Calculate speedup vs. FP32 Eager
+    df_highlight["Mean Time (ms)"] = pd.to_numeric(df_highlight["Mean Time (ms)"])
+    baseline_times = {}
+    for op_k_prec in (
+        df_highlight[["Operation", "K", "Precision"]]
+        .drop_duplicates()
+        .to_records(index=False)
+    ):
+        op, k, prec = op_k_prec
+        baseline = df_highlight[
+            (df_highlight["Operation"] == op)
+            & (df_highlight["K"] == k)
+            & (df_highlight["Precision"] == prec)
+            & (df_highlight["Mode"] == "Eager")
+        ]
+        if not baseline.empty:
+            key = (op, k, prec)
+            baseline_times[key] = baseline["Mean Time (ms)"].iloc[0]
 
-    # KNN, K=16
-    knn_k16 = df[df["K"] == 16]
-    knn_fp32_eager = get_best_time(
-        knn_k16[
-            (knn_k16["Config"] == highlight_config)
-            & (knn_k16["Precision"] == "FP32")
-            & (knn_k16["Mode"] == "Eager")
-        ]
-    )
-    knn_fp16_eager = get_best_time(
-        knn_k16[
-            (knn_k16["Config"] == highlight_config)
-            & (knn_k16["Precision"] == "FP16")
-            & (knn_k16["Mode"] == "Eager")
-        ]
-    )
-    knn_fp16_compiled = get_best_time(
-        knn_k16[
-            (knn_k16["Config"] == highlight_config)
-            & (knn_k16["Precision"] == "FP16")
-            & (knn_k16["Mode"] == "Compile")
-        ]
-    )
+    def get_speedup(row):
+        baseline_key = (row["Operation"], row["K"], row["Precision"])
+        baseline_time = baseline_times.get(baseline_key)
+        if baseline_time and baseline_time > 0 and row["Mean Time (ms)"] > 0:
+            return f"{baseline_time / row['Mean Time (ms)']:.2f}x"
+        return "1.00x"
 
-    # Chamfer
-    chamfer_fp32_eager = get_best_time(
-        df[
-            (df["Operation"] == "Chamfer")
-            & (df["Config"] == highlight_config)
-            & (df["Precision"] == "FP32")
-            & (df["Mode"] == "Eager")
-        ]
-    )
-    chamfer_fp16_eager = get_best_time(
-        df[
-            (df["Operation"] == "Chamfer")
-            & (df["Config"] == highlight_config)
-            & (df["Precision"] == "FP16")
-            & (df["Mode"] == "Eager")
-        ]
-    )
-    chamfer_fp16_compiled = get_best_time(
-        df[
-            (df["Operation"] == "Chamfer")
-            & (df["Config"] == highlight_config)
-            & (df["Precision"] == "FP16")
-            & (df["Mode"] == "Compile")
-        ]
-    )
+    df_highlight["Speedup vs Eager"] = df_highlight.apply(get_speedup, axis=1)
 
-    # EMD (only FP32)
-    emd_fp32_eager = get_best_time(
-        df[
-            (df["Operation"] == "EMD")
-            & (df["Config"] == highlight_config)
-            & (df["Precision"] == "FP32")
-            & (df["Mode"] == "Eager")
-        ]
-    )
-    emd_fp32_compiled = get_best_time(
-        df[
-            (df["Operation"] == "EMD")
-            & (df["Config"] == highlight_config)
-            & (df["Precision"] == "FP32")
-            & (df["Mode"] == "Compile")
-        ]
-    )
+    # Build Markdown table
+    md_table_header = """
+| Operation      | Precision | Mode                      | Runtime (ms) | Speedup vs Eager |
+|----------------|-----------|---------------------------|--------------|------------------|"""
+    md_table_rows = [md_table_header]
 
-    md_table = f"""
-| Operation | Point Cloud Size  | Precision | Mode    | Runtime (ms) | Notes                               |
-|-----------|-------------------|-----------|---------|--------------|-------------------------------------|
-| **KNN (K=16)** | 1024x1024         | FP32      | Eager   | {knn_fp32_eager}     | Baseline performance                |
-|           |                   | **FP16**  | Eager   | **{knn_fp16_eager}**     | Up to 2x faster with half precision |
-|           |                   | **FP16**  | Compile | **{knn_fp16_compiled}**     | **~3x total speedup** vs baseline     |
-| **Chamfer** | 1024x1024         | FP32      | Eager   | {chamfer_fp32_eager}     | Baseline performance                |
-|           |                   | **FP16**  | Eager   | **{chamfer_fp16_eager}**     | ~1.5x speedup with half precision   |
-|           |                   | **FP16**  | Compile | **{chamfer_fp16_compiled}**     | **~2x total speedup** vs baseline     |
-| **EMD**     | 1024x1024         | FP32      | Eager   | {emd_fp32_eager}     | Baseline, FP16 not recommended    |
-|           |                   | FP32      | Compile | {emd_fp32_compiled}     | `torch.compile` provides moderate gains |
+    key_ops = [
+        ("KNN", 16),
+        ("Chamfer", "N/A"),
+        ("EMD", "N/A"),
+    ]
 
-*Benchmarks run on an NVIDIA RTX 3090. Runtimes are for a single forward pass.*
-"""
+    for op, k in key_ops:
+        df_op = df_highlight[df_highlight["Operation"] == op]
+        if k != "N/A":
+            df_op = df_op[df_op["K"] == k]
+
+        if df_op.empty:
+            continue
+
+        for _, row in df_op.sort_values(by=["Precision", "Mode"]).iterrows():
+            op_str = f"**{op} (K={k})**" if k != "N/A" else f"**{op}**"
+            md_table_rows.append(
+                f"| {op_str:<14} | {row['Precision']:<9} | {row['Mode']:<25} | {row['Mean Time (ms)']:<12.3f} | {row['Speedup vs Eager']:<16} |"
+            )
+
+    md_table = "\n".join(md_table_rows)
+
+    print(f"\nPerformance for configuration: {highlight_config}")
     print(md_table)
+    print(
+        "\n*Runtimes are for a single forward pass on an NVIDIA GPU. Speedup is relative to the Eager mode of the same precision.*"
+    )
 
 
 if __name__ == "__main__":
