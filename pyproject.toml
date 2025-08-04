@@ -3,7 +3,7 @@ name = "torch-point-ops"
 version = "0.1.0"
 description = "A PyTorch library for point cloud operations, including Chamfer Distance and Earth Mover's Distance (EMD)."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 license = "MIT"
 authors = [
     { name = "Satyajit Ghana", email = "satyajitghana7@gmail.com" },
