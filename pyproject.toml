@@ -21,8 +21,8 @@ classifiers = [
     "Programming Language :: C++",
 ]
 dependencies = [
-    "numpy>2",
-    "torch>=2.7.1",
+    "numpy>=2.3.2",
+    "torch>=2.8.0",
 ]
 
 [project.urls]
