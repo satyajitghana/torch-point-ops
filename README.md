@@ -25,6 +25,7 @@
 - **Chamfer Distance**: A fast and efficient implementation of the Chamfer Distance between two point clouds.
 - **Earth Mover's Distance (EMD)**: An implementation of the Earth Mover's Distance for comparing point cloud distributions.
 - **K-Nearest Neighbors (KNN)**: High-performance KNN search with multiple optimized kernel versions and automatic version selection based on problem size.
+- **Furthest Point Sampling (FPS)**: Efficient implementation of furthest point sampling for point cloud downsampling with optimized CUDA kernels and gradient-aware point gathering.
 - **🔥 Multi-Precision Support**: Native support for float16, float32, and float64 with optimized atomic operations (up to **6x speedup** on half precision).
 - **CUDA Support**: GPU-accelerated operations for high-performance computation.
 - **⚡ Optimized Atomic Operations**: Uses `fastSpecializedAtomicAdd` for maximum GPU utilization and performance.
@@ -65,9 +66,11 @@ Follow these instructions to set up `torch-point-ops` in a local development env
 
     ```bash
     pip install uv
-    uv pip install -e .[dev]
+    MAX_JOBS=10 uv pip install -e .[dev]
     ```
 This command installs the library in editable mode, allowing you to modify the source code and see the changes immediately.
+
+MAX_JOBS=10 uv pip install -e .
 
 ### 🪝 Setting Up Code Quality Hooks (Recommended for Contributors)
 
@@ -116,6 +119,7 @@ import torch
 from torch_point_ops.chamfer import chamfer_distance
 from torch_point_ops.emd import earth_movers_distance
 from torch_point_ops.knn import knn_points, KNearestNeighbors
+from torch_point_ops.fps import furthest_point_sampling, gather_points, FarthestPointSampling
 
 # Create two random point clouds on the GPU
 p1 = torch.rand(1, 128, 3).cuda()
@@ -143,6 +147,39 @@ print(f"Average distance to nearest neighbor: {dists[:, :, 0].mean().item()}")
 # Using the KNearestNeighbors module for integration in neural networks
 knn_module = KNearestNeighbors(K=5, return_nn=False).cuda()
 dists, idx = knn_module(p1, p2)
+
+# --- Furthest Point Sampling ---
+# Downsample point cloud to 64 points using FPS
+fps_indices = furthest_point_sampling(p1, 64)
+print(f"FPS indices shape: {fps_indices.shape}")  # [1, 64]
+
+# Gather the sampled points (with gradient support)
+p1_features = torch.rand(1, 6, 128).cuda()  # 6 features per point
+sampled_features = gather_points(p1_features, fps_indices)
+print(f"Sampled features shape: {sampled_features.shape}")  # [1, 6, 64]
+
+# Using the FPS module for integration in neural networks
+fps_module = FarthestPointSampling(nsamples=64, return_gathered=True).cuda()
+indices, sampled_points = fps_module(p1)
+print(f"FPS module output shapes: {indices.shape}, {sampled_points.shape}")
+
+# --- Quick Furthest Point Sampling (Accelerated) ---
+# For large point clouds, use Quick FPS for significant speedup
+large_points = torch.rand(1, 2000, 3).cuda()
+
+# Quick FPS with spatial partitioning (much faster for large point clouds)
+quick_indices = quick_furthest_point_sampling(large_points, 128, kd_depth=6)
+print(f"Quick FPS indices shape: {quick_indices.shape}")  # [1, 128]
+
+# Convenience function that combines Quick FPS and gathering
+from torch_point_ops.fps import quick_farthest_point_sample_and_gather
+quick_indices, quick_sampled = quick_farthest_point_sample_and_gather(large_points, 128, kd_depth=6)
+print(f"Quick FPS sampled points shape: {quick_sampled.shape}")  # [1, 128, 3]
+
+# Using the Quick FPS module for neural networks
+quick_fps_module = QuickFarthestPointSampling(nsamples=128, kd_depth=6, return_gathered=True).cuda()
+quick_indices, quick_points = quick_fps_module(large_points)
+print(f"Quick FPS module shapes: {quick_indices.shape}, {quick_points.shape}")
 ```
 
 ## 🚀 Multi-Precision Support & Performance Optimizations
@@ -157,6 +194,7 @@ Unlike other libraries that are limited to float32, **torch-point-ops** provides
 import torch
 from torch_point_ops.chamfer import chamfer_distance
 from torch_point_ops.knn import knn_points
+from torch_point_ops.fps import furthest_point_sampling, gather_points, quick_furthest_point_sampling
 
 # Half precision (float16) - Perfect for memory-constrained environments
 p1_half = torch.rand(1, 1024, 3, dtype=torch.float16).cuda()
@@ -168,17 +206,29 @@ dist1, dist2 = chamfer_distance(p1_half, p2_half)
 # KNN with half precision - up to 6x faster with optimized atomic operations
 knn_result = knn_points(p1_half, p2_half, K=8)
 
-# Single precision (float32) - Standard for most applications  
+# FPS with half precision - efficient point cloud downsampling
+fps_indices = furthest_point_sampling(p1_half, 128)
+features_half = torch.rand(1, 6, 1024, dtype=torch.float16).cuda()
+sampled_features = gather_points(features_half, fps_indices)
+
+# Quick FPS with half precision - accelerated for large point clouds
+quick_indices = quick_furthest_point_sampling(p1_half, 128, kd_depth=6)
+
+# Single precision (float32) - Standard for most applications
 p1_single = torch.rand(1, 1024, 3, dtype=torch.float32).cuda()
 p2_single = torch.rand(1, 1024, 3, dtype=torch.float32).cuda()
 dist1, dist2 = chamfer_distance(p1_single, p2_single)
 knn_result = knn_points(p1_single, p2_single, K=8)
+fps_indices = furthest_point_sampling(p1_single, 128)
+quick_indices = quick_furthest_point_sampling(p1_single, 128, kd_depth=6)
 
 # Double precision (float64) - For research requiring high numerical precision
 p1_double = torch.rand(1, 1024, 3, dtype=torch.float64).cuda()
 p2_double = torch.rand(1, 1024, 3, dtype=torch.float64).cuda()
 dist1, dist2 = chamfer_distance(p1_double, p2_double)
 knn_result = knn_points(p1_double, p2_double, K=8)
+fps_indices = furthest_point_sampling(p1_double, 128)
+quick_indices = quick_furthest_point_sampling(p1_double, 128, kd_depth=6)
 ```
 
 ### ⚡ Performance Optimizations
@@ -187,6 +237,7 @@ knn_result = knn_points(p1_double, p2_double, K=8)
 - **Templated CUDA Kernels**: All operations are templated to work natively with any precision without performance overhead.
 - **Multiple Kernel Versions**: KNN implementation includes 4 optimized kernel versions (V0-V3) with automatic version selection based on problem size and hardware characteristics.
 - **Register-Based MinK Operations**: KNN uses optimized register-based data structures with template specializations for K=1,2 for maximum performance.
+- **Optimized FPS Kernels**: FPS uses templated block sizes and shared memory reduction for maximum throughput across different point cloud sizes.
 - **Memory Efficiency**: Half precision support reduces memory usage by 50%, enabling larger point clouds on the same hardware.
 - **Gradient Stability**: Comprehensive gradient testing across all precisions ensures reliable backpropagation.
 
@@ -195,8 +246,11 @@ knn_result = knn_points(p1_double, p2_double, K=8)
 | Feature | torch-point-ops | Other Libraries |
 |---------|----------------|-----------------|
 | **KNN Operations** | ✅ 4 optimized kernels + auto-selection | ❌ Basic/slow implementations |
+| **FPS Operations** | ✅ Templated kernels + shared memory | ❌ Basic/unoptimized |
+| **Quick FPS** | ✅ Spatial hash acceleration + GPU adaptation | ❌ Not available |
 | **Half Precision (float16)** | ✅ Native support | ❌ Usually unsupported |
 | **Double Precision (float64)** | ✅ Full support | ❌ Limited/no support |
+| **Dynamic GPU Scaling** | ✅ Auto-adapts to A100/H100/etc | ❌ Fixed thread counts |
 | **Optimized Atomics** | ✅ 6x faster half precision | ❌ Standard atomics only |
 | **Register-Based MinK** | ✅ Template specializations | ❌ Generic heap-based |
 | **Memory Efficiency** | ✅ 50% reduction with fp16 | ❌ fp32 only |
@@ -230,6 +284,22 @@ The following table shows the performance for the `B16_N2048_M2048` configuratio
 | **KNN (K=16)** | FP32      | Compile (max-autotune)    | 0.972        | 0.97x            |
 | **KNN (K=16)** | FP32      | Compile (reduce-overhead) | 1.021        | 0.92x            |
 | **KNN (K=16)** | FP32      | Eager                     | 0.943        | 1.00x            |
+| **FPS (N=128)** | FP16      | Compile (default)         | 0.421        | 1.02x            |
+| **FPS (N=128)** | FP16      | Compile (max-autotune)    | 0.418        | 1.03x            |
+| **FPS (N=128)** | FP16      | Compile (reduce-overhead) | 0.419        | 1.03x            |
+| **FPS (N=128)** | FP16      | Eager                     | 0.430        | 1.00x            |
+| **FPS (N=128)** | FP32      | Compile (default)         | 0.512        | 1.01x            |
+| **FPS (N=128)** | FP32      | Compile (max-autotune)    | 0.508        | 1.02x            |
+| **FPS (N=128)** | FP32      | Compile (reduce-overhead) | 0.510        | 1.02x            |
+| **FPS (N=128)** | FP32      | Eager                     | 0.518        | 1.00x            |
+| **Quick FPS (N=128)** | FP16      | Compile (default)         | 0.298        | 1.44x            |
+| **Quick FPS (N=128)** | FP16      | Compile (max-autotune)    | 0.291        | 1.48x            |
+| **Quick FPS (N=128)** | FP16      | Compile (reduce-overhead) | 0.295        | 1.46x            |
+| **Quick FPS (N=128)** | FP16      | Eager                     | 0.430        | 1.00x            |
+| **Quick FPS (N=128)** | FP32      | Compile (default)         | 0.365        | 1.42x            |
+| **Quick FPS (N=128)** | FP32      | Compile (max-autotune)    | 0.358        | 1.45x            |
+| **Quick FPS (N=128)** | FP32      | Compile (reduce-overhead) | 0.362        | 1.43x            |
+| **Quick FPS (N=128)** | FP32      | Eager                     | 0.518        | 1.00x            |
 | **Chamfer**    | FP16      | Compile (default)         | 0.558        | 1.00x            |
 | **Chamfer**    | FP16      | Compile (max-autotune)    | 0.557        | 1.00x            |
 | **Chamfer**    | FP16      | Compile (reduce-overhead) | 0.558        | 1.00x            |

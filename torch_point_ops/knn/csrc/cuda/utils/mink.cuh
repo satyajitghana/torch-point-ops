@@ -4,6 +4,40 @@
 #include <algorithm>
 #include <limits>
 
+// Helper functions for type-safe comparisons
+template<typename T>
+__device__ __forceinline__ bool is_less(const T& a, const T& b) {
+  return a < b;
+}
+
+template<typename T>
+__device__ __forceinline__ bool is_greater(const T& a, const T& b) {
+  return a > b;
+}
+
+template<typename T>
+__device__ __forceinline__ bool is_equal(const T& a, const T& b) {
+  return a == b;
+}
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530
+// Specializations for c10::Half to avoid operator ambiguity
+template<>
+__device__ __forceinline__ bool is_less<c10::Half>(const c10::Half& a, const c10::Half& b) {
+  return static_cast<float>(a) < static_cast<float>(b);
+}
+
+template<>
+__device__ __forceinline__ bool is_greater<c10::Half>(const c10::Half& a, const c10::Half& b) {
+  return static_cast<float>(a) > static_cast<float>(b);
+}
+
+template<>
+__device__ __forceinline__ bool is_equal<c10::Half>(const c10::Half& a, const c10::Half& b) {
+  return static_cast<float>(a) == static_cast<float>(b);
+}
+#endif
+
 // Helper to get infinity for different types
 template<typename T>
 struct NumericLimits {
@@ -63,14 +97,14 @@ public:
       int max_idx = 0;
       scalar_t max_dist = dists_[0];
       for (int i = 1; i < K_; ++i) {
-        if (dists_[i] > max_dist) {
+        if (is_greater(dists_[i], max_dist)) {
           max_dist = dists_[i];
           max_idx = i;
         }
       }
       
       // Replace if new distance is smaller
-      if (dist < max_dist) {
+      if (is_less(dist, max_dist)) {
         dists_[max_idx] = dist;
         idxs_[max_idx] = idx;
       }
@@ -110,14 +144,14 @@ public:
       int max_idx = 0;
       scalar_t max_dist = local_dists_[0];
       for (int i = 1; i < K; ++i) {
-        if (local_dists_[i] > max_dist) {
+        if (is_greater(local_dists_[i], max_dist)) {
           max_dist = local_dists_[i];
           max_idx = i;
         }
       }
       
       // Replace if new distance is smaller
-      if (dist < max_dist) {
+      if (is_less(dist, max_dist)) {
         local_dists_[max_idx] = dist;
         local_idxs_[max_idx] = idx;
       }
@@ -150,7 +184,7 @@ public:
     dists_(dists), idxs_(idxs), min_dist_(NumericLimits<scalar_t>::inf()), min_idx_(-1), size_(0) {}
 
   __device__ void add(scalar_t dist, index_t idx) {
-    if (size_ == 0 || dist < min_dist_) {
+    if (size_ == 0 || is_less(dist, min_dist_)) {
       min_dist_ = dist;
       min_idx_ = idx;
       if (size_ == 0) size_ = 1;
@@ -190,7 +224,7 @@ public:
       min_idxs_[0] = idx;
       size_ = 1;
     } else if (size_ == 1) {
-      if (dist < min_dists_[0]) {
+      if (is_less(dist, min_dists_[0])) {
         min_dists_[1] = min_dists_[0];
         min_idxs_[1] = min_idxs_[0];
         min_dists_[0] = dist;
@@ -201,12 +235,12 @@ public:
       }
       size_ = 2;
     } else {
-      if (dist < min_dists_[0]) {
+      if (is_less(dist, min_dists_[0])) {
         min_dists_[1] = min_dists_[0];
         min_idxs_[1] = min_idxs_[0];
         min_dists_[0] = dist;
         min_idxs_[0] = idx;
-      } else if (dist < min_dists_[1]) {
+      } else if (is_less(dist, min_dists_[1])) {
         min_dists_[1] = dist;
         min_idxs_[1] = idx;
       }

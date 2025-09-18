@@ -429,7 +429,7 @@ __global__ void KNearestNeighborBackwardKernel(
     const size_t d = rem % D;
     
     const size_t num1 = lengths1[n];
-    const size_t num2 = lengths2[n];
+    // const size_t num2 = lengths2[n];  // Unused variable
     
     if (p1_idx < num1) {
       const scalar_t grad_dist = grad_dists[n * P1 * K + p1_idx * K + k];
@@ -443,8 +443,8 @@ __global__ void KNearestNeighborBackwardKernel(
 
       scalar_t diff = 0;
       if (norm == 1) {
-        scalar_t sign = (p1_val > p2_val) ? scalar_t(1) : scalar_t(-1);
-        if (p1_val == p2_val) sign = scalar_t(0);
+        scalar_t sign = is_greater(p1_val, p2_val) ? scalar_t(1) : scalar_t(-1);
+        if (is_equal(p1_val, p2_val)) sign = scalar_t(0);
         diff = grad_dist * sign;
       } else { // norm == 2
         diff = scalar_t(2) * grad_dist * (p1_val - p2_val);

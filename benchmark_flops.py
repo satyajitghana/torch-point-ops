@@ -27,6 +27,7 @@ try:
     from torch_point_ops.emd import earth_movers_distance
     from torch_point_ops.chamfer import chamfer_distance
     from torch_point_ops.knn import knn_points
+    from torch_point_ops.fps import furthest_point_sampling, quick_furthest_point_sampling
 except ImportError as e:
     print(f"Error importing torch_point_ops: {e}")
     print(
@@ -80,6 +81,25 @@ def theoretical_flops_knn(n_points: int, m_points: int, k: int) -> int:
     return distance_matrix_flops + selection_flops
 
 
+def theoretical_flops_fps(n_points: int, nsamples: int) -> int:
+    """Estimate theoretical FLOPs for Furthest Point Sampling."""
+    # For each of nsamples iterations:
+    # - Compute distance from last selected point to all remaining points: n_points * 8 FLOPs
+    # - Update minimum distances: n_points comparisons and assignments
+    # - Find maximum among minimum distances: n_points comparisons
+    flops_per_iteration = n_points * (8 + 1 + 1)  # 10 FLOPs per point per iteration
+    total_flops = nsamples * flops_per_iteration
+    return total_flops
+
+
+def theoretical_flops_quick_fps(n_points: int, nsamples: int, kd_depth: int) -> int:
+    """Estimate theoretical FLOPs for Quick Furthest Point Sampling."""
+    # Quick FPS uses KD-tree spatial partitioning but fundamentally has same algorithm
+    # In current implementation, it's identical to regular FPS, so same FLOPs
+    # Future KD-tree optimizations would reduce this, but current version is same
+    return theoretical_flops_fps(n_points, nsamples)
+
+
 # --- Benchmarking Core ---
 
 
@@ -104,6 +124,13 @@ def benchmark_operation(
         theoretical_flops = theoretical_flops_chamfer(n_points, m_points)
     elif op_name == "KNN":
         theoretical_flops = theoretical_flops_knn(n_points, m_points, k)
+    elif op_name == "FPS":
+        nsamples = config_details.get("nsamples", k)
+        theoretical_flops = theoretical_flops_fps(n_points, nsamples)
+    elif op_name == "Quick_FPS":
+        nsamples = config_details.get("nsamples", k)
+        kd_depth = config_details.get("kd_depth", 4)
+        theoretical_flops = theoretical_flops_quick_fps(n_points, nsamples, kd_depth)
     else:
         theoretical_flops = 0
 
@@ -144,7 +171,7 @@ def benchmark_operation(
 def main():
     """Main benchmarking function."""
     print("=" * 80)
-    print("Benchmarking Torch Point Operations (EMD, Chamfer, KNN)")
+    print("Benchmarking Torch Point Operations (EMD, Chamfer, KNN, FPS, Quick FPS)")
     print("=" * 80)
 
     if not torch.cuda.is_available():
@@ -155,11 +182,15 @@ def main():
     print(f"Using GPU: {torch.cuda.get_device_name(0)}")
 
     # --- Configurations ---
-    # Larger sizes for more meaningful benchmarks
+    # Different sizes for comprehensive FPS benchmarking
     size_configs = [
-        (64, 512, 512),
-        (32, 1024, 1024),
-        (16, 2048, 2048),
+        # Small batches
+        (64, 256, 256),   # Small point clouds, large batch
+        (32, 512, 512),   # Medium point clouds, medium batch
+        # Large batches
+        (16, 1024, 1024), # Large point clouds, small batch
+        (8, 2048, 2048),  # Very large point clouds, very small batch
+        (1, 4096, 4096),  # Huge point clouds, single batch
     ]
     # Precision configs
     dtypes = [torch.float32, torch.float16]
@@ -182,6 +213,17 @@ def main():
     }
     for k in k_values:
         base_ops[f"KNN_K{k}"] = lambda p1, p2, k=k: knn_points(p1, p2, K=k)
+    
+    # FPS operations - note FPS only uses p1, but we keep p2 for interface consistency
+    fps_nsamples = [64, 128, 256, 512]
+    kd_depths = [3, 4, 5, 6]
+    
+    for nsamples in fps_nsamples:
+        base_ops[f"FPS_N{nsamples}"] = lambda p1, p2, nsamples=nsamples: furthest_point_sampling(p1, nsamples)
+        
+        # Add Quick FPS with different KD depths
+        for kd_depth in kd_depths:
+            base_ops[f"Quick_FPS_N{nsamples}_D{kd_depth}"] = lambda p1, p2, nsamples=nsamples, kd_depth=kd_depth: quick_furthest_point_sampling(p1, nsamples, kd_depth)
 
     # Pre-compile all function variants
     compiled_ops = {}
@@ -213,9 +255,15 @@ def main():
                 if op_key.startswith("KNN"):
                     op_name = "KNN"
                     k = int(op_key.split("_K")[1])
+                    nsamples = "N/A"
+                elif op_key.startswith("FPS"):
+                    op_name = "FPS"
+                    k = "N/A"
+                    nsamples = int(op_key.split("_N")[1])
                 else:
                     op_name = op_key
                     k = "N/A"
+                    nsamples = "N/A"
 
                 if op_name == "EMD" and dtype == torch.float16:
                     continue
@@ -227,9 +275,11 @@ def main():
                         "Precision": dtype_str,
                         "Mode": mode_name,
                         "K": k,
+                        "nsamples": nsamples,
                     }
+                    param_str = f"K={k}" if k != "N/A" else f"N={nsamples}"
                     print(
-                        f"  Benchmarking: {op_name} (K={k}, {dtype_str}, {mode_name})"
+                        f"  Benchmarking: {op_name} ({param_str}, {dtype_str}, {mode_name})"
                     )
 
                     if "Compile" in mode_name:
@@ -254,11 +304,22 @@ def main():
     df["Mean Time (ms)"] = df["Mean Time (ms)"].map("{:.3f}".format)
     df["GFLOPS"] = df["GFLOPS"].map("{:.2f}".format)
 
+    # Add a combined parameter column for display
+    def get_param_str(row):
+        if row["K"] != "N/A":
+            return f"K={row['K']}"
+        elif row["nsamples"] != "N/A":
+            return f"N={row['nsamples']}"
+        else:
+            return "N/A"
+    
+    df["Params"] = df.apply(get_param_str, axis=1)
+    
     # Reorder columns for display
     display_cols = [
         "Operation",
         "Config",
-        "K",
+        "Params",
         "Precision",
         "Mode",
         "Mean Time (ms)",
@@ -287,24 +348,24 @@ def main():
     # Calculate speedup vs. FP32 Eager
     df_highlight["Mean Time (ms)"] = pd.to_numeric(df_highlight["Mean Time (ms)"])
     baseline_times = {}
-    for op_k_prec in (
-        df_highlight[["Operation", "K", "Precision"]]
+    for op_params_prec in (
+        df_highlight[["Operation", "Params", "Precision"]]
         .drop_duplicates()
         .to_records(index=False)
     ):
-        op, k, prec = op_k_prec
+        op, params, prec = op_params_prec
         baseline = df_highlight[
             (df_highlight["Operation"] == op)
-            & (df_highlight["K"] == k)
+            & (df_highlight["Params"] == params)
             & (df_highlight["Precision"] == prec)
             & (df_highlight["Mode"] == "Eager")
         ]
         if not baseline.empty:
-            key = (op, k, prec)
+            key = (op, params, prec)
             baseline_times[key] = baseline["Mean Time (ms)"].iloc[0]
 
     def get_speedup(row):
-        baseline_key = (row["Operation"], row["K"], row["Precision"])
+        baseline_key = (row["Operation"], row["Params"], row["Precision"])
         baseline_time = baseline_times.get(baseline_key)
         if baseline_time and baseline_time > 0 and row["Mean Time (ms)"] > 0:
             return f"{baseline_time / row['Mean Time (ms)']:.2f}x"
@@ -319,21 +380,22 @@ def main():
     md_table_rows = [md_table_header]
 
     key_ops = [
-        ("KNN", 16),
+        ("KNN", "K=16"),
+        ("FPS", "N=128"),
         ("Chamfer", "N/A"),
         ("EMD", "N/A"),
     ]
 
-    for op, k in key_ops:
+    for op, param in key_ops:
         df_op = df_highlight[df_highlight["Operation"] == op]
-        if k != "N/A":
-            df_op = df_op[df_op["K"] == k]
+        if param != "N/A":
+            df_op = df_op[df_op["Params"] == param]
 
         if df_op.empty:
             continue
 
         for _, row in df_op.sort_values(by=["Precision", "Mode"]).iterrows():
-            op_str = f"**{op} (K={k})**" if k != "N/A" else f"**{op}**"
+            op_str = f"**{op} ({param})**" if param != "N/A" else f"**{op}**"
             md_table_rows.append(
                 f"| {op_str:<14} | {row['Precision']:<9} | {row['Mode']:<25} | {row['Mean Time (ms)']:<12.3f} | {row['Speedup vs Eager']:<16} |"
             )

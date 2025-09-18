@@ -5,6 +5,7 @@ description = "A PyTorch library for point cloud operations, including Chamfer D
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Satyajit Ghana", email = "satyajitghana7@gmail.com" },
 ]
@@ -22,6 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.3.2",
+    "ptpython>=3.0.31",
     "torch>=2.8.0",
 ]
 
@@ -31,15 +33,13 @@ dependencies = [
 "Bug Tracker" = "https://github.com/satyajitghana/torch-point-ops/issues"
 
 [tool.uv]
-no-build-isolation = true
 package = false
 
 [build-system]
 requires = ["setuptools>=61.0", "torch>=2.7.1"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-license-files = ["LICENSE"]
+
 
 [dependency-groups]
 dev = [
@@ -47,8 +47,10 @@ dev = [
     "black>=25.1.0",
     "expecttest>=0.3.0",
     "fvcore>=0.1.5.post20221221",
+    "ninja>=1.13.0",
     "pandas>=2.3.1",
     "pre-commit>=4.2.0",
+    "psutil>=7.0.0",
     "pytest>=8.4.1",
     "ruff>=0.12.3",
 ]

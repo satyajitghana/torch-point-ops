@@ -9,6 +9,30 @@
 
 namespace torch_point_ops {
 
+// Helper functions for type-safe comparisons
+template<typename scalar_t>
+__device__ __forceinline__ bool is_less(const scalar_t& a, const scalar_t& b) {
+  return a < b;
+}
+
+template<typename scalar_t>
+__device__ __forceinline__ bool is_greater(const scalar_t& a, const scalar_t& b) {
+  return a > b;
+}
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530
+// Specializations for c10::Half to avoid operator ambiguity
+template<>
+__device__ __forceinline__ bool is_less<c10::Half>(const c10::Half& a, const c10::Half& b) {
+  return static_cast<float>(a) < static_cast<float>(b);
+}
+
+template<>
+__device__ __forceinline__ bool is_greater<c10::Half>(const c10::Half& a, const c10::Half& b) {
+  return static_cast<float>(a) > static_cast<float>(b);
+}
+#endif
+
 template<typename scalar_t>
 __global__ void chamfer_dist_kernel(int batch_size,
                                     int n,
@@ -42,7 +66,7 @@ __global__ void chamfer_dist_kernel(int batch_size,
               scalar_t z2   = buf[k * 3 + 2] - z1;
               scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
 
-              if (k == 0 || dist < best_dist) {
+              if (k == 0 || is_less(dist, best_dist)) {
                 best_dist       = dist;
                 best_dist_index = k + k2;
               }
@@ -52,7 +76,7 @@ __global__ void chamfer_dist_kernel(int batch_size,
               scalar_t y2   = buf[k * 3 + 4] - y1;
               scalar_t z2   = buf[k * 3 + 5] - z1;
               scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
-              if (dist < best_dist) {
+              if (is_less(dist, best_dist)) {
                 best_dist       = dist;
                 best_dist_index = k + k2 + 1;
               }
@@ -62,7 +86,7 @@ __global__ void chamfer_dist_kernel(int batch_size,
               scalar_t y2   = buf[k * 3 + 7] - y1;
               scalar_t z2   = buf[k * 3 + 8] - z1;
               scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
-              if (dist < best_dist) {
+              if (is_less(dist, best_dist)) {
                 best_dist       = dist;
                 best_dist_index = k + k2 + 2;
               }
@@ -72,7 +96,7 @@ __global__ void chamfer_dist_kernel(int batch_size,
               scalar_t y2   = buf[k * 3 + 10] - y1;
               scalar_t z2   = buf[k * 3 + 11] - z1;
               scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
-              if (dist < best_dist) {
+              if (is_less(dist, best_dist)) {
                 best_dist       = dist;
                 best_dist_index = k + k2 + 3;
               }
@@ -85,7 +109,7 @@ __global__ void chamfer_dist_kernel(int batch_size,
               scalar_t y2   = buf[k * 3 + 1] - y1;
               scalar_t z2   = buf[k * 3 + 2] - z1;
               scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
-              if (k == 0 || dist < best_dist) {
+              if (k == 0 || is_less(dist, best_dist)) {
                 best_dist       = dist;
                 best_dist_index = k + k2;
               }
@@ -95,7 +119,7 @@ __global__ void chamfer_dist_kernel(int batch_size,
               scalar_t y2   = buf[k * 3 + 4] - y1;
               scalar_t z2   = buf[k * 3 + 5] - z1;
               scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
-              if (dist < best_dist) {
+              if (is_less(dist, best_dist)) {
                 best_dist       = dist;
                 best_dist_index = k + k2 + 1;
               }
@@ -105,7 +129,7 @@ __global__ void chamfer_dist_kernel(int batch_size,
               scalar_t y2   = buf[k * 3 + 7] - y1;
               scalar_t z2   = buf[k * 3 + 8] - z1;
               scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
-              if (dist < best_dist) {
+              if (is_less(dist, best_dist)) {
                 best_dist       = dist;
                 best_dist_index = k + k2 + 2;
               }
@@ -115,7 +139,7 @@ __global__ void chamfer_dist_kernel(int batch_size,
               scalar_t y2   = buf[k * 3 + 10] - y1;
               scalar_t z2   = buf[k * 3 + 11] - z1;
               scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
-              if (dist < best_dist) {
+              if (is_less(dist, best_dist)) {
                 best_dist       = dist;
                 best_dist_index = k + k2 + 3;
               }
@@ -127,12 +151,12 @@ __global__ void chamfer_dist_kernel(int batch_size,
           scalar_t y2   = buf[k * 3 + 1] - y1;
           scalar_t z2   = buf[k * 3 + 2] - z1;
           scalar_t dist = x2 * x2 + y2 * y2 + z2 * z2;
-          if (k == 0 || dist < best_dist) {
+          if (k == 0 || is_less(dist, best_dist)) {
             best_dist       = dist;
             best_dist_index = k + k2;
           }
         }
-        if (k2 == 0 || dist[(i * n + j)] > best_dist) {
+        if (k2 == 0 || is_greater(dist[(i * n + j)], best_dist)) {
           dist[(i * n + j)]    = best_dist;
           indexes[(i * n + j)] = best_dist_index;
         }
